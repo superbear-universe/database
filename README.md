@@ -115,6 +115,18 @@ cd /volume1/superbear/database/mcp-server
 npm install
 ```
 
+**If `npm install` fails with `gyp ERR! not found: make`**, DSM is missing the C build tools that `better-sqlite3` needs to compile from source. Fix this by installing them via Entware:
+
+1. Install the **Entware** package from SynoCommunity's package source (add `https://packages.synocommunity.com` in Package Center → Settings → Package Sources, then install *Entware*).
+2. Once Entware is installed, open SSH and run:
+   ```bash
+   opkg update
+   opkg install make gcc binutils
+   ```
+3. Re-run `npm install`.
+
+If you prefer not to install Entware, an alternative is to run `npm install` on any Linux x86-64 machine with the same Node.js major version, then copy the entire `mcp-server/node_modules/` directory to the NAS.
+
 ### 4. Create a boot-time startup task
 
 1. Open **Control Panel → Task Scheduler**.
