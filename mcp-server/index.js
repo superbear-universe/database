@@ -1,16 +1,25 @@
 #!/usr/bin/env node
-import { createServer } from 'node:http';
+import express from 'express';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { mcpAuthRouter } from '@modelcontextprotocol/sdk/server/auth/router.js';
+import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import Database from 'better-sqlite3';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { randomUUID } from 'node:crypto';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env.SUPERBEAR_DB_PATH ?? join(__dirname, '..', 'superbear.db');
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
-const API_KEY = process.env.SUPERBEAR_API_KEY;
+const ADMIN_PASSWORD = process.env.SUPERBEAR_API_KEY;
+const ISSUER_URL = new URL(process.env.SUPERBEAR_ISSUER_URL ?? `http://localhost:${PORT}`);
+
+if (!ADMIN_PASSWORD) {
+  console.error('Error: SUPERBEAR_API_KEY must be set (used as the OAuth authorization password)');
+  process.exit(1);
+}
 
 const db = new Database(DB_PATH, { readonly: true });
 db.pragma('journal_mode = WAL');
@@ -312,44 +321,152 @@ function makeServer() {
   return server;
 }
 
-// ── HTTP server ───────────────────────────────────────────────────────────────
+// ── OAuth provider ────────────────────────────────────────────────────────────
 
-const httpServer = createServer(async (req, res) => {
-  if (API_KEY) {
-    const auth = req.headers['authorization'] ?? '';
-    if (auth !== `Bearer ${API_KEY}`) {
-      res.writeHead(401, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Unauthorized' }));
-      return;
-    }
+const TOKEN_TTL = 60 * 60 * 24 * 30; // 30 days
+
+class InMemoryClientsStore {
+  _clients = new Map();
+  async getClient(id) { return this._clients.get(id); }
+  async registerClient(meta) { this._clients.set(meta.client_id, meta); return meta; }
+}
+
+class SuperbearAuthProvider {
+  clientsStore = new InMemoryClientsStore();
+  _pending = new Map(); // nonce -> { client, params }
+  _codes   = new Map(); // code  -> { client, params }
+  _tokens  = new Map(); // token -> AuthInfo
+
+  async authorize(client, params, res) {
+    const nonce = randomUUID();
+    this._pending.set(nonce, { client, params });
+    res.send(loginPage(nonce));
   }
 
-  if (req.url !== '/mcp') {
-    res.writeHead(404);
-    res.end();
+  async challengeForAuthorizationCode(_client, code) {
+    const data = this._codes.get(code);
+    if (!data) throw new Error('Invalid authorization code');
+    return data.params.codeChallenge;
+  }
+
+  async exchangeAuthorizationCode(client, code) {
+    const data = this._codes.get(code);
+    if (!data) throw new Error('Invalid authorization code');
+    this._codes.delete(code);
+
+    const token = randomUUID();
+    this._tokens.set(token, {
+      token,
+      clientId: client.client_id,
+      scopes: data.params.scopes ?? [],
+      expiresAt: Math.floor(Date.now() / 1000) + TOKEN_TTL,
+      resource: data.params.resource,
+    });
+
+    return { access_token: token, token_type: 'bearer', expires_in: TOKEN_TTL };
+  }
+
+  async exchangeRefreshToken() {
+    throw new Error('Refresh tokens not supported; please re-authorize');
+  }
+
+  async verifyAccessToken(token) {
+    const info = this._tokens.get(token);
+    if (!info || info.expiresAt < Math.floor(Date.now() / 1000)) {
+      throw new Error('Invalid or expired token');
+    }
+    return info;
+  }
+
+  async revokeToken(_client, request) {
+    this._tokens.delete(request.token);
+  }
+
+  // Called by the /authorize/confirm POST route
+  confirmAuthorization(nonce, password) {
+    if (password !== ADMIN_PASSWORD) return null;
+    const pending = this._pending.get(nonce);
+    if (!pending) return null;
+    this._pending.delete(nonce);
+    const code = randomUUID();
+    this._codes.set(code, pending);
+    return { code, params: pending.params };
+  }
+}
+
+function loginPage(nonce) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Superbear MCP — Authorize</title>
+  <style>
+    *{box-sizing:border-box}
+    body{font-family:system-ui,sans-serif;max-width:380px;margin:5rem auto;padding:0 1rem;color:#1a1a1a}
+    h1{font-size:1.25rem;margin-bottom:.25rem}
+    p{color:#555;margin:.25rem 0 1.5rem;font-size:.9375rem}
+    label{display:block;font-size:.875rem;font-weight:500;margin-bottom:.375rem}
+    input[type=password]{display:block;width:100%;padding:.5rem .75rem;border:1px solid #ccc;border-radius:.375rem;font-size:1rem;margin-bottom:1rem}
+    button{padding:.5rem 1.25rem;background:#2563eb;color:#fff;border:none;border-radius:.375rem;font-size:.9375rem;cursor:pointer}
+    button:hover{background:#1d4ed8}
+  </style>
+</head>
+<body>
+  <h1>Superbear MCP</h1>
+  <p>Enter your password to authorize access.</p>
+  <form method="POST" action="/authorize/confirm">
+    <input type="hidden" name="nonce" value="${nonce}">
+    <label for="pw">Password</label>
+    <input type="password" id="pw" name="password" autofocus autocomplete="current-password">
+    <button type="submit">Authorize</button>
+  </form>
+</body>
+</html>`;
+}
+
+// ── Express app ───────────────────────────────────────────────────────────────
+
+const provider = new SuperbearAuthProvider();
+const app = express();
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+
+// OAuth endpoints: /.well-known/oauth-authorization-server, /authorize, /token, /register, /revoke
+app.use(mcpAuthRouter({
+  provider,
+  issuerUrl: ISSUER_URL,
+  resourceName: 'Superbear Universe',
+  scopesSupported: [],
+}));
+
+// Login form submission
+app.post('/authorize/confirm', (req, res) => {
+  const { nonce, password } = req.body;
+  const result = provider.confirmAuthorization(nonce, password);
+
+  if (!result) {
+    res.status(401).send('Incorrect password.');
     return;
   }
 
-  let body;
-  if (req.method === 'POST') {
-    const chunks = [];
-    for await (const chunk of req) chunks.push(chunk);
-    try {
-      body = JSON.parse(Buffer.concat(chunks).toString());
-    } catch {
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: 'Invalid JSON' }));
-      return;
-    }
-  }
+  const target = new URL(result.params.redirectUri);
+  target.searchParams.set('code', result.code);
+  if (result.params.state) target.searchParams.set('state', result.params.state);
+  res.redirect(target.toString());
+});
 
+// MCP endpoint — protected by OAuth bearer token
+app.all('/mcp', requireBearerAuth({ verifier: provider }), async (req, res) => {
   const server = makeServer();
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   await server.connect(transport);
-  await transport.handleRequest(req, res, body);
+  await transport.handleRequest(req, res, req.body);
   res.on('finish', () => server.close());
 });
 
-httpServer.listen(PORT, () => {
+app.listen(PORT, () => {
   console.error(`Superbear MCP server listening on port ${PORT}`);
+  console.error(`Issuer: ${ISSUER_URL}`);
 });

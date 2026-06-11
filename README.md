@@ -179,10 +179,13 @@ Then re-run `npm install`. To make the `PATH` change and the `/opt` bind-mount p
 PORT=3000 \
 SUPERBEAR_DB_PATH=/volume1/superbear/database/superbear.db \
 SUPERBEAR_API_KEY=your-secret-key \
+SUPERBEAR_ISSUER_URL=https://your-nas-domain \
 node /volume1/superbear/database/mcp-server/index.js &>> /volume1/superbear/mcp-server.log &
 ```
 
-Replace `your-secret-key` with a strong random string. The `&>>` redirects logs to a file; the trailing `&` keeps it running in the background.
+- `SUPERBEAR_API_KEY` — the password shown on the OAuth authorization page when connecting a client
+- `SUPERBEAR_ISSUER_URL` — the public HTTPS URL of the server (e.g. `https://sb-mcp.myshuno.net`); must match what clients see
+- The `&>>` redirects logs to a file; the trailing `&` keeps it running in the background
 
 5. Click **OK**, then select the task and click **Run** to start it immediately without rebooting.
 
@@ -204,24 +207,29 @@ If you want to expose the server over HTTPS (e.g. for remote access from Claude 
 
 The MCP endpoint will then be at `https://[your-NAS-domain]/mcp`.
 
-### 6. Connect Claude Desktop
+### 6. Connect a client
 
-Since the server is accessed over HTTP rather than launched as a child process, use the `url` form in `claude_desktop_config.json`:
+The server uses OAuth 2.0, so clients discover and complete the auth flow automatically.
 
+**claude.ai** — go to Settings → Integrations → Add integration and enter:
+```
+https://your-nas-domain/mcp
+```
+Claude.ai will open a browser tab to the authorization page. Enter your `SUPERBEAR_API_KEY` password to approve.
+
+**Claude Desktop** (HTTP transport) — add to `claude_desktop_config.json`:
 ```json
 {
   "mcpServers": {
     "superbear-universe": {
-      "url": "http://[NAS-IP]:3000/mcp",
-      "headers": {
-        "Authorization": "Bearer your-secret-key"
-      }
+      "url": "https://your-nas-domain/mcp"
     }
   }
 }
 ```
+Claude Desktop will prompt you to authorize on first use.
 
-For HTTPS via Web Station, replace the URL accordingly. Restart Claude Desktop after saving.
+Tokens are valid for 30 days. Re-authorization happens automatically when they expire.
 
 ---
 
