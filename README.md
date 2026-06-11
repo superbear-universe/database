@@ -121,24 +121,20 @@ npm install
 
 `better-sqlite3` is a native addon, so the build machine's glibc must be the same version or older than the NAS's glibc. The safest way to guarantee this is to build inside a Docker container pinned to an older Debian release.
 
-First, check what glibc version the NAS is running (over SSH):
+Synology DSM 7.x typically ships with glibc 2.28, so build inside a Debian 10 (Buster) container which targets that version:
 
 ```bash
-ldd --version | head -1
-```
-
-Then build using a matching Docker image. For most Synology DSM 7.x (glibc 2.28–2.31):
-
-```bash
-# Debian 11 / glibc 2.31 — use this for most DSM 7.x NAS
 docker run --rm \
   -v "$(pwd)/mcp-server:/app" \
   -w /app \
-  node:22-bullseye \
+  node:22-buster \
   npm install
+```
 
-# If the NAS reports glibc 2.28 or older, use Debian 10 instead:
-# docker run --rm -v "$(pwd)/mcp-server:/app" -w /app node:22-buster npm install
+If you want to confirm the exact glibc version on your NAS first (`ldd` is not available on DSM), run this over SSH:
+
+```bash
+find /lib /lib64 -name "libc.so.6" 2>/dev/null -exec {} --version \; | head -1
 ```
 
 Then copy the result to the NAS:
