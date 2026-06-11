@@ -115,17 +115,59 @@ cd /volume1/superbear/database/mcp-server
 npm install
 ```
 
-**If `npm install` fails with `gyp ERR! not found: make`**, DSM is missing the C build tools that `better-sqlite3` needs to compile from source. Fix this by installing them via Entware:
+**If `npm install` fails with `gyp ERR! not found: make`**, DSM is missing the C build tools that `better-sqlite3` needs to compile from source. Two options:
 
-1. Install the **Entware** package from SynoCommunity's package source (add `https://packages.synocommunity.com` in Package Center → Settings → Package Sources, then install *Entware*).
-2. Once Entware is installed, open SSH and run:
-   ```bash
-   opkg update
-   opkg install make gcc binutils
-   ```
-3. Re-run `npm install`.
+**Option A — Build on another machine and copy**
 
-If you prefer not to install Entware, an alternative is to run `npm install` on any Linux x86-64 machine with the same Node.js major version, then copy the entire `mcp-server/node_modules/` directory to the NAS.
+`better-sqlite3` is a native addon, so the build machine's glibc must be the same version or older than the NAS's glibc. The safest way to guarantee this is to build inside a Docker container pinned to an older Debian release.
+
+First, check what glibc version the NAS is running (over SSH):
+
+```bash
+ldd --version | head -1
+```
+
+Then build using a matching Docker image. For most Synology DSM 7.x (glibc 2.28–2.31):
+
+```bash
+# Debian 11 / glibc 2.31 — use this for most DSM 7.x NAS
+docker run --rm \
+  -v "$(pwd)/mcp-server:/app" \
+  -w /app \
+  node:22-bullseye \
+  npm install
+
+# If the NAS reports glibc 2.28 or older, use Debian 10 instead:
+# docker run --rm -v "$(pwd)/mcp-server:/app" -w /app node:22-buster npm install
+```
+
+Then copy the result to the NAS:
+
+```bash
+rsync -a mcp-server/node_modules/ admin@[NAS-IP]:/volume1/superbear/database/mcp-server/node_modules/
+```
+
+**Option B — Install build tools via Entware**
+
+Entware can be bootstrapped directly over SSH without a package manager:
+
+```bash
+# Create a persistent home for Entware and symlink /opt to it
+mkdir -p /volume1/@Entware/opt
+mount -o bind /volume1/@Entware/opt /opt
+
+# Download and run the bootstrap (x86-64 NAS)
+wget -O /tmp/entware.sh https://bin.entware.net/x64-k3.2/installer/generic.sh
+sh /tmp/entware.sh
+
+# Add Entware binaries to PATH for this session
+export PATH=/opt/bin:/opt/sbin:$PATH
+
+# Install build tools
+opkg update && opkg install make gcc binutils
+```
+
+Then re-run `npm install`. To make the `PATH` change and the `/opt` bind-mount persistent across reboots, add them to a boot-time Task Scheduler script (same place as the MCP startup task).
 
 ### 4. Create a boot-time startup task
 
