@@ -1,0 +1,15 @@
+{
+  "name": "superbear-extract",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "extract": "node extract.js",
+    "extract:force": "node extract.js --force",
+    "sync": "node extract.js --sync"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0",
+    "better-sqlite3": "^9.6.0",
+    "gray-matter": "^4.0.3"
+  }
+}

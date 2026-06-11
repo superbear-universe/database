@@ -1,0 +1,15 @@
+{
+  "name": "superbear-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "superbear-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "better-sqlite3": "^9.6.0"
+  }
+}
