@@ -99,7 +99,9 @@ Extract a summary, the key events in order, and the main POV characters.`;
     source_file: filePath
   }, 'slug');
 
-  const storyId = storyResult.lastInsertRowid || db.prepare('SELECT id FROM stories WHERE slug = ?').get(slug).id;
+  const storyRow = db.prepare('SELECT id FROM stories WHERE slug = ?').get(slug);
+  if (!storyRow) throw new Error(`Story not found after upsert for slug: ${slug}`);
+  const storyId = storyRow.id;
 
   // Clear old events for this story on re-extraction
   db.prepare('DELETE FROM story_events WHERE story_id = ?').run(storyId);
