@@ -180,11 +180,13 @@ PORT=3000 \
 SUPERBEAR_DB_PATH=/volume1/superbear/database/superbear.db \
 SUPERBEAR_API_KEY=your-secret-key \
 SUPERBEAR_ISSUER_URL=https://your-nas-domain \
+SUPERBEAR_CLIENT_ID=your-client-id \
 node /volume1/superbear/database/mcp-server/index.js &>> /volume1/superbear/mcp-server.log &
 ```
 
 - `SUPERBEAR_API_KEY` — the password shown on the OAuth authorization page when connecting a client
 - `SUPERBEAR_ISSUER_URL` — the public HTTPS URL of the server (e.g. `https://sb-mcp.myshuno.net`); must match what clients see
+- `SUPERBEAR_CLIENT_ID` — any string you choose (e.g. `superbear-claude`); enter this in the client's "OAuth Client ID" field
 - The `&>>` redirects logs to a file; the trailing `&` keeps it running in the background
 
 5. Click **OK**, then select the task and click **Run** to start it immediately without rebooting.
@@ -215,7 +217,7 @@ The server uses OAuth 2.0, so clients discover and complete the auth flow automa
 ```
 https://your-nas-domain/mcp
 ```
-Claude.ai will open a browser tab to the authorization page. Enter your `SUPERBEAR_API_KEY` password to approve.
+In the **OAuth Client ID** field enter the value you set for `SUPERBEAR_CLIENT_ID`. Leave the client secret blank. Claude.ai will open a browser tab to the server's login page — enter your `SUPERBEAR_API_KEY` password to approve.
 
 **Claude Desktop** (HTTP transport) — add to `claude_desktop_config.json`:
 ```json

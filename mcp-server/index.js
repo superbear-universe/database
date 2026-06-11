@@ -15,6 +15,7 @@ const DB_PATH = process.env.SUPERBEAR_DB_PATH ?? join(__dirname, '..', 'superbea
 const PORT = parseInt(process.env.PORT ?? '3000', 10);
 const ADMIN_PASSWORD = process.env.SUPERBEAR_API_KEY;
 const ISSUER_URL = new URL(process.env.SUPERBEAR_ISSUER_URL ?? `http://localhost:${PORT}`);
+const PRE_CLIENT_ID = process.env.SUPERBEAR_CLIENT_ID;
 
 if (!ADMIN_PASSWORD) {
   console.error('Error: SUPERBEAR_API_KEY must be set (used as the OAuth authorization password)');
@@ -327,8 +328,26 @@ const TOKEN_TTL = 60 * 60 * 24 * 30; // 30 days
 
 class InMemoryClientsStore {
   _clients = new Map();
+
+  constructor() {
+    if (PRE_CLIENT_ID) {
+      this._clients.set(PRE_CLIENT_ID, {
+        client_id: PRE_CLIENT_ID,
+        redirect_uris: [],
+        grant_types: ['authorization_code'],
+        response_types: ['code'],
+        token_endpoint_auth_method: 'none',
+      });
+    }
+  }
+
   async getClient(id) { return this._clients.get(id); }
   async registerClient(meta) { this._clients.set(meta.client_id, meta); return meta; }
+
+  learnRedirectUri(clientId, uri) {
+    const c = this._clients.get(clientId);
+    if (c && !c.redirect_uris.includes(uri)) c.redirect_uris = [...c.redirect_uris, uri];
+  }
 }
 
 class SuperbearAuthProvider {
@@ -432,6 +451,15 @@ const app = express();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
+// Register the redirect URI for the pre-registered client on first authorization request
+app.get('/authorize', (req, res, next) => {
+  const { client_id, redirect_uri } = req.query;
+  if (client_id && redirect_uri && typeof redirect_uri === 'string') {
+    provider.clientsStore.learnRedirectUri(client_id, redirect_uri);
+  }
+  next();
+});
 
 // OAuth endpoints: /.well-known/oauth-authorization-server, /authorize, /token, /register, /revoke
 app.use(mcpAuthRouter({
