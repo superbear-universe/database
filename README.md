@@ -88,6 +88,93 @@ This combines a normal extraction run with a cleanup pass that removes any datab
 
 ---
 
+## Running the MCP server on Synology DSM (Web Station)
+
+The MCP server is a plain HTTP process. On a Synology NAS you run it as a persistent background service via Task Scheduler, and optionally front it with a Web Station reverse proxy for HTTPS access.
+
+### 1. Install Node.js
+
+Open **Package Center**, search for **Node.js**, and install it (v18 or later).
+
+### 2. Copy the files to the NAS
+
+Copy the entire `database/` directory to a location on your NAS, for example:
+
+```
+/volume1/superbear/database/
+```
+
+You can use File Station, `rsync`, or SSH/SCP. Make sure `superbear.db` is present (run extraction locally first, then copy the `.db` file across, or run extraction directly on the NAS with an `ANTHROPIC_API_KEY`).
+
+### 3. Install dependencies
+
+SSH into the NAS and run:
+
+```bash
+cd /volume1/superbear/database/mcp-server
+npm install
+```
+
+### 4. Create a boot-time startup task
+
+1. Open **Control Panel → Task Scheduler**.
+2. Click **Create → Triggered Task → User-defined script**.
+3. Set:
+   - **Task name:** `superbear-mcp`
+   - **User:** the user that owns the files (e.g. your admin account)
+   - **Event:** Boot-up
+4. Under **Task Settings**, enter the script:
+
+```bash
+PORT=3000 \
+SUPERBEAR_DB_PATH=/volume1/superbear/database/superbear.db \
+SUPERBEAR_API_KEY=your-secret-key \
+node /volume1/superbear/database/mcp-server/index.js &>> /volume1/superbear/mcp-server.log &
+```
+
+Replace `your-secret-key` with a strong random string. The `&>>` redirects logs to a file; the trailing `&` keeps it running in the background.
+
+5. Click **OK**, then select the task and click **Run** to start it immediately without rebooting.
+
+To verify it's running:
+
+```bash
+curl http://localhost:3000/mcp
+# should return 405 Method Not Allowed (correct — POST is required)
+```
+
+### 5. (Optional) HTTPS via Web Station reverse proxy
+
+If you want to expose the server over HTTPS (e.g. for remote access from Claude Desktop on another machine):
+
+1. Open **Web Station → Web Service Portal → Create**.
+2. Choose **Nginx** as the back-end server.
+3. Under **Reverse Proxy**, set the backend to `http://localhost:3000`.
+4. Assign a port (e.g. 443) and upload or provision a TLS certificate.
+
+The MCP endpoint will then be at `https://[your-NAS-domain]/mcp`.
+
+### 6. Connect Claude Desktop
+
+Since the server is accessed over HTTP rather than launched as a child process, use the `url` form in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "superbear-universe": {
+      "url": "http://[NAS-IP]:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer your-secret-key"
+      }
+    }
+  }
+}
+```
+
+For HTTPS via Web Station, replace the URL accordingly. Restart Claude Desktop after saving.
+
+---
+
 ## Available MCP tools
 
 Once the server is connected, Claude can use the following tools:

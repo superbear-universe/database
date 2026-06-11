@@ -110,6 +110,7 @@ Extract a summary, the key events in order, and the main POV characters.`;
 
   for (let i = 0; i < (data.events ?? []).length; i++) {
     const ev = data.events[i];
+    if (!ev.summary) continue;
     const eventType = VALID_EVENT_TYPES.has(ev.event_type) ? ev.event_type : 'other';
     db.prepare(`
       INSERT INTO story_events (story_id, sequence_order, event_type, summary, characters_involved, location, significance, direct_quote)
